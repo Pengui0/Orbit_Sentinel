@@ -19,6 +19,13 @@ async def insert_conjunction(db: AsyncIOMotorDatabase, conjunction_dict: Dict[st
     pair_key = "_".join(sorted([nid_a, nid_b]))
     conjunction_dict["pair_key"] = pair_key
 
+    # Detection sweeps rebuild ConjunctionEvent objects, which gives the same
+    # satellite pair a fresh UUID each run. Preserve the existing event_id so
+    # frontend detail links do not become stale between polling/websocket ticks.
+    existing = await db["conjunctions"].find_one({"pair_key": pair_key})
+    if existing and existing.get("event_id"):
+        conjunction_dict["event_id"] = existing["event_id"]
+
     try:
         result = await db["conjunctions"].find_one_and_update(
             {"pair_key": pair_key},

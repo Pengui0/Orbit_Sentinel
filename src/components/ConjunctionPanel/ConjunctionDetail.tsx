@@ -93,6 +93,14 @@ export default function ConjunctionDetail({ eventId, onClose, onCloseKeepSelecti
     const fetchDetail = async () => {
       setLoading(true);
       setError(null);
+
+      const storeConj = conjunctions.find((c: any) => c.id === eventId || c.event_id === eventId);
+      if (storeConj) {
+        setData(storeConj);
+        setLoading(false);
+        return;
+      }
+
       try {
         const response: any = await getConjunctionDetail(eventId);
         if (!active) return;
@@ -106,12 +114,8 @@ export default function ConjunctionDetail({ eventId, onClose, onCloseKeepSelecti
         // If 404 (demo conjunction not in backend DB), fall back to local store data
         const status = err?.response?.status;
         if (status === 404 || status === undefined) {
-          const storeConj = conjunctions.find((c: any) => c.id === eventId || c.event_id === eventId);
-          if (storeConj) {
-            setData(storeConj);
-            setLoading(false);
-            return;
-          }
+          setError('Conjunction event is no longer active in the database.');
+          return;
         }
 
         console.error('Failed to load conjunction detail:', err);
@@ -209,6 +213,18 @@ export default function ConjunctionDetail({ eventId, onClose, onCloseKeepSelecti
           const r = 6371 + alt;
           return parseFloat((2 * Math.sqrt(mu / r) * Math.sin(Math.PI / 4)).toFixed(2));
         })();
+
+  const relVelocityLabel = (() => {
+    if (!Number.isFinite(relVelocity)) return 'N/A';
+    if (relVelocity < 0.01) {
+      const metersPerSecond = relVelocity * 1000;
+      return `${metersPerSecond < 1 ? metersPerSecond.toFixed(2) : metersPerSecond.toFixed(1)} m/s`;
+    }
+    if (relVelocity < 1) {
+      return `${relVelocity.toFixed(3)} km/s`;
+    }
+    return `${relVelocity.toFixed(2)} km/s`;
+  })();
 
   const colProb = data.collision_probability_chan !== undefined 
     ? data.collision_probability_chan 
@@ -433,7 +449,7 @@ export default function ConjunctionDetail({ eventId, onClose, onCloseKeepSelecti
             <div className="bg-slate-950/60 border border-cyan-950/20 p-2.5 rounded flex flex-col gap-0.5">
               <span className="text-[8px] font-mono text-slate-500 font-semibold uppercase">Relative Velocity</span>
               <span className="text-xs font-black font-mono text-slate-200">
-                {relVelocity.toFixed(2)} km/s
+                {relVelocityLabel}
               </span>
             </div>
 
