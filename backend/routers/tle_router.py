@@ -10,6 +10,38 @@ from backend.core.scheduler import sentinel_scheduler
 
 router = APIRouter()
 
+_COUNTRY_HINTS = {
+    "ZARYA": "MULTINATIONAL", "ISS": "MULTINATIONAL", "NAUKA": "MULTINATIONAL",
+    "STARLINK": "USA", "NAVSTAR": "USA", "GPS": "USA", "GOES": "USA",
+    "TERRA": "USA", "AQUA": "USA", "LANDSAT": "USA", "NOAA": "USA",
+    "IRIDIUM": "USA", "GLOBALSTAR": "USA", "WORLDVIEW": "USA", "GEOEYE": "USA",
+    "ONEWEB": "UK", "SKYNET": "UK", "INMARSAT": "UK",
+    "COSMOS": "RUSSIA", "GLONASS": "RUSSIA", "METEOR": "RUSSIA",
+    "RESURS": "RUSSIA", "PROGRESS": "RUSSIA", "SOYUZ": "RUSSIA",
+    "YAOGAN": "CHINA", "BEIDOU": "CHINA", "FENGYUN": "CHINA",
+    "TIANGONG": "CHINA", "SHIJIAN": "CHINA", "CHINASAT": "CHINA",
+    "SENTINEL": "ESA", "ENVISAT": "ESA", "CRYOSAT": "ESA", "AEOLUS": "ESA",
+    "SPOT": "FRANCE", "PLEIADES": "FRANCE", "SYRACUSE": "FRANCE",
+    "ALOS": "JAPAN", "HIMAWARI": "JAPAN", "IGS": "JAPAN", "QZSS": "JAPAN",
+    "CARTOSAT": "INDIA", "RISAT": "INDIA", "RESOURCESAT": "INDIA",
+    "INSAT": "INDIA", "IRNSS": "INDIA", "GSAT": "INDIA", "NAVIC": "INDIA",
+    "PSLV": "INDIA", "EMISAT": "INDIA",
+    "KOMPSAT": "S.KOREA", "ARIRANG": "S.KOREA",
+    "AMOS": "ISRAEL", "OFEQ": "ISRAEL",
+    "HELLAS": "GREECE", "ARABSAT": "ARAB LEAGUE",
+    "INTELSAT": "INTL", "SES": "INTL", "EUTELSAT": "INTL", "THURAYA": "INTL",
+    "DEBRIS": "N/A", "OBJECT": "N/A", "R/B": "N/A", "DEB": "N/A",
+}
+
+def _resolve_owner(name_or_owner: str) -> str:
+    if not name_or_owner:
+        return "N/A"
+    val = name_or_owner.upper()
+    for keyword, country in _COUNTRY_HINTS.items():
+        if keyword in val:
+            return country
+    return "N/A"
+
 def serialize_mongo_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     if not doc:
         return doc
@@ -168,6 +200,27 @@ async def get_current_world_positions(db = Depends(get_db)):
             except Exception:
                 continue
             orig_sat = sats_map.get(n_id, {})
+
+            # Derive orbital elements from TLE line 2
+            tle2 = orig_sat.get("tle2", "")
+            incl_deg = None
+            apogee_km = None
+            perigee_km = None
+            try:
+                if len(tle2) > 60:
+                    incl_deg = round(float(tle2[8:16].strip()), 4)
+                    mean_motion = float(tle2[52:63].strip())  # rev/day
+                    ecc_str = "0." + tle2[26:33].strip()
+                    ecc = float(ecc_str)
+                    MU = 398600.4418  # km^3/s^2
+                    n_rad = mean_motion * 2 * 3.141592653589793 / 86400
+                    a = (MU / (n_rad ** 2)) ** (1/3)
+                    RE = 6371.0
+                    apogee_km = round(a * (1 + ecc) - RE, 1)
+                    perigee_km = round(a * (1 - ecc) - RE, 1)
+            except Exception:
+                pass
+
             enriched.append({
                 "norad_id": n_id,
                 "name": pos.get("name", orig_sat.get("name", "SAT")),
@@ -177,6 +230,11 @@ async def get_current_world_positions(db = Depends(get_db)):
                 "lon": lon,
                 "alt": alt,
                 "speed_kmps": pos.get("speed_kmps"),
+                "velocity": pos.get("speed_kmps"),
+                "inclination": incl_deg,
+                "apogee": apogee_km,
+                "perigee": perigee_km,
+                "owner": _resolve_owner(orig_sat.get("owner") or orig_sat.get("country_code") or pos.get("name", orig_sat.get("name", ""))),
                 "x": pos.get("x"),
                 "y": pos.get("y"),
                 "z": pos.get("z"),

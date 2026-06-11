@@ -252,7 +252,7 @@ export default function MainDashboard() {
                         {activeSelectedSatellite.name}
                       </h3>
                       <p className="font-mono text-[8.5px] text-slate-500 uppercase tracking-widest mt-0.5">
-                        OPERATED BY: {activeSelectedSatellite.owner || 'Unknown'}
+                        OPERATED BY: {activeSelectedSatellite.owner || 'N/A'}
                       </p>
 
                       {/* Hardware details Grid */}
@@ -266,19 +266,19 @@ export default function MainDashboard() {
                         <div className="bg-[#060b19]/60 p-1.5 rounded border border-[#142340]/25">
                           <span className="text-slate-500 block truncate text-[7.5px]">INCLINATION DEG</span>
                           <span className="text-white font-semibold">
-                            {activeSelectedSatellite.inclination || '0.00'}°
+                            {activeSelectedSatellite.inclination != null ? Number(activeSelectedSatellite.inclination).toFixed(2) : '—'}°
                           </span>
                         </div>
                         <div className="bg-[#060b19]/60 p-1.5 rounded border border-[#142340]/25">
                           <span className="text-slate-500 block truncate text-[7.5px]">APOGEE / PERIGEE</span>
                           <span className="text-white font-semibold">
-                            {activeSelectedSatellite.apogee || '0'}km / {activeSelectedSatellite.perigee || '0'}km
+                            {activeSelectedSatellite.apogee != null ? activeSelectedSatellite.apogee : '—'}km / {activeSelectedSatellite.perigee != null ? activeSelectedSatellite.perigee : '—'}km
                           </span>
                         </div>
                         <div className="bg-[#060b19]/60 p-1.5 rounded border border-[#142340]/25">
                           <span className="text-slate-500 block truncate text-[7.5px]">VELOCITY VALUE</span>
                           <span className="text-emerald-400 font-semibold">
-                            {activeSelectedSatellite.velocity || '0.00'} km/s
+                            {activeSelectedSatellite.velocity != null ? Number(activeSelectedSatellite.velocity).toFixed(2) : (activeSelectedSatellite.speed_kmps != null ? Number(activeSelectedSatellite.speed_kmps).toFixed(2) : '—')} km/s
                           </span>
                         </div>
                       </div>

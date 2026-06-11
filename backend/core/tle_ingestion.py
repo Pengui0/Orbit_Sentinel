@@ -218,6 +218,40 @@ async def store_tle_snapshot(db: AsyncIOMotorDatabase, count: int, source: str) 
     logger.info(f"Captured active snapshot log record. Count: {count} elements.")
     return str(result.inserted_id)
 
+async def fetch_satcat_owner_map() -> Dict[str, str]:
+    """
+    Fetches CelesTrak SATCAT CSV and builds a norad_id -> country/owner map.
+    Returns empty dict on failure so ingestion is never blocked.
+    """
+    url = "https://celestrak.org/pub/satcat.csv"
+    owner_map = {}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            lines = resp.text.splitlines()
+            if not lines:
+                return owner_map
+            header = [h.strip() for h in lines[0].split(",")]
+            try:
+                norad_idx = header.index("NORAD_CAT_ID")
+                owner_idx = header.index("OWNER")
+            except ValueError:
+                logger.warning("SATCAT CSV header format unexpected, skipping owner map.")
+                return owner_map
+            for line in lines[1:]:
+                parts = line.split(",")
+                if len(parts) > max(norad_idx, owner_idx):
+                    nid = parts[norad_idx].strip().lstrip("0")
+                    owner = parts[owner_idx].strip()
+                    if nid and owner:
+                        owner_map[nid] = owner
+            logger.info(f"Loaded {len(owner_map)} owner entries from SATCAT.")
+    except Exception as e:
+        logger.warning(f"SATCAT owner fetch failed (non-fatal): {e}")
+    return owner_map
+
+
 async def upsert_satellite_catalogue(db, tle_list: list) -> int:
     """Upserts satellites using the db abstraction layer (TinyDB + MongoDB compatible)."""
     if not tle_list:
@@ -225,10 +259,13 @@ async def upsert_satellite_catalogue(db, tle_list: list) -> int:
         return 0
 
     timestamp = utc_now()
+    owner_map = await fetch_satcat_owner_map()
     total_processed = 0
     for item in tle_list:
         try:
             categories = categorize_object(item["norad_id"], item["name"], item["tle1"])
+            norad_stripped = item["norad_id"].lstrip("0")
+            owner = owner_map.get(norad_stripped, owner_map.get(item["norad_id"], "N/A"))
             await db["satellites"].update_one(
                 {"norad_id": item["norad_id"]},
                 {"$set": {
@@ -240,6 +277,7 @@ async def upsert_satellite_catalogue(db, tle_list: list) -> int:
                     "criticality_score": categories["criticality_score"],
                     "last_updated": timestamp,
                     "maneuver_count": 0,
+                    "owner": owner,
                 }},
                 upsert=True,
             )
