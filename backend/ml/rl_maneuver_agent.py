@@ -349,6 +349,7 @@ class RLManeuverAgent:
         self.model      = None
         self.vec_norm   = None          # VecNormalize stats if available
         self.is_trained = False
+        self.training_metrics = {}
         os.makedirs("ml_models", exist_ok=True)
 
     # ── Training ──────────────────────────────────────────────────────────
@@ -436,6 +437,13 @@ class RLManeuverAgent:
                 self.vec_norm.training = False
                 self.vec_norm.norm_reward = False
             self.is_trained = True
+            curve_path = self.MODEL_PATH.replace(".zip", "_training_curve.json")
+            if os.path.exists(curve_path):
+                try:
+                    with open(curve_path, "r") as f:
+                        self.training_metrics = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Could not load PPO training curve metrics: {e}")
             return True
         except Exception as e:
             logger.error(f"Model load failed: {e}")

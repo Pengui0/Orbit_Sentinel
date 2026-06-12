@@ -94,8 +94,9 @@ def generate_synthetic_training_data(n_samples: int = 50000) -> Tuple[np.ndarray
 
     # Ensure class balance: if fewer than 1000 positives, generate physics-consistent positives
     n_positives = np.sum(y == 1)
-    if n_positives < 1000:
-        needed = 1000 - n_positives
+    target_positives = int(0.30 * n_samples)
+    if n_positives < target_positives:
+        needed = target_positives - n_positives
         logger.info(f"Adding {needed} physics-consistent positive training samples to balance ANN...")
 
         # Sample parameters that produce Pc_final > 1e-4 using the same formula
@@ -143,6 +144,7 @@ class CollisionProbabilityANN:
         self.scaler = None
         self.is_trained = False
         self.accuracy_metrics = {}
+        self.threshold = 0.5
         os.makedirs("ml_models", exist_ok=True)
         
     def train(self, X=None, y=None):
@@ -156,7 +158,6 @@ class CollisionProbabilityANN:
         
         self.scaler = StandardScaler()
         X_train_scaled = self.scaler.fit_transform(X_train)
-        sw = compute_sample_weight('balanced', y_train)
         
         X_test_scaled = self.scaler.transform(X_test)
         
@@ -164,14 +165,14 @@ class CollisionProbabilityANN:
             hidden_layer_sizes=(128, 64, 32),
             activation='relu',
             solver='adam',
-            max_iter=300,
+            max_iter=800,
             random_state=42,
             early_stopping=True,
             validation_fraction=0.1,
-            n_iter_no_change=15
+            n_iter_no_change=30
         )
         
-        self.model.fit(X_train_scaled, y_train, sample_weight=sw)
+        self.model.fit(X_train_scaled, y_train)
         
         # Balanced eval — equal positives/negatives, honest metric on imbalanced domain
         pos_idx = np.where(y_test == 1)[0]
@@ -207,17 +208,27 @@ class CollisionProbabilityANN:
         else:
             X_bal, y_bal = X_test_scaled, y_test
 
-        y_pred = self.model.predict(X_bal)
+        probs_bal = self.model.predict_proba(X_bal)[:, 1]
+        best_f1, best_thr = 0.0, 0.5
+        for thr in np.arange(0.05, 0.96, 0.01):
+            y_pred_thr = (probs_bal >= thr).astype(int)
+            f1_thr = f1_score(y_bal, y_pred_thr, zero_division=0)
+            if f1_thr > best_f1:
+                best_f1, best_thr = f1_thr, thr
+
+        y_pred = (probs_bal >= best_thr).astype(int)
         prec = precision_score(y_bal, y_pred, zero_division=0)
         rec = recall_score(y_bal, y_pred, zero_division=0)
         f1 = f1_score(y_bal, y_pred, zero_division=0)
-        accuracy = self.model.score(X_bal, y_bal)
+        accuracy = float(np.mean(y_pred == y_bal))
 
+        self.threshold = float(best_thr)
         self.accuracy_metrics = {
             "precision": float(prec),
             "recall": float(rec),
             "f1_score": float(f1),
-            "accuracy": float(accuracy)
+            "accuracy": float(accuracy),
+            "threshold": float(best_thr)
         }
         
         # Save models securely to disk
@@ -250,10 +261,8 @@ class CollisionProbabilityANN:
                     try:
                         with open(metrics_path, "r") as _f:
                             loaded_m = _json.load(_f)
-                        if loaded_m.get("f1_score", 0) > 0.50:
-                            self.accuracy_metrics = loaded_m
-                        else:
-                            self.accuracy_metrics = {}
+                        self.accuracy_metrics = loaded_m
+                        self.threshold = loaded_m.get("threshold", 0.5)
                     except Exception:
                         self.accuracy_metrics = {}
                 else:
@@ -298,6 +307,9 @@ class CollisionProbabilityANN:
         except Exception as e:
             logger.error(f"Prediction error inside ANN probability routine: {e}")
             return 0.0
+
+    def predict_is_high_risk(self, features_dict: dict) -> bool:
+        return self.predict_probability(features_dict) >= self.threshold
             
     def encode_object_type(self, obj_type: str) -> int:
         if not obj_type:

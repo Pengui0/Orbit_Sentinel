@@ -173,17 +173,18 @@ export default function AnalyticsDashboard({ onAddLog }: AnalyticsDashboardProps
   // =========================================================================
   // CHART 4: KESSLER RISK INDEX — 7 DAY TREND (LineChart with ReferenceLine)
   // =========================================================================
-  const kesslerTrendData = useMemo(() => {
-    // Generate slight upward trend representing constellation crowding
-    return [
-      { day: 'Mon', risk: 14 },
-      { day: 'Tue', risk: 22 },
-      { day: 'Wed', risk: 36 },
-      { day: 'Thu', risk: 29 },
-      { day: 'Fri', risk: 44 },
-      { day: 'Sat', risk: 51 },
-      { day: 'Sun', risk: 58 }
-    ];
+  const [kesslerTrendData, setKesslerTrendData] = useState<{ day: string; risk: number }[]>([]);
+
+  useEffect(() => {
+    api.get('/analytics/kessler_trend')
+      .then((res: any) => {
+        if (Array.isArray(res) && res.length > 0) {
+          setKesslerTrendData(res);
+        }
+      })
+      .catch(() => {
+        setKesslerTrendData([]);
+      });
   }, []);
 
   // =========================================================================

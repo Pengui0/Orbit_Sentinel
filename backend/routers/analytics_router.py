@@ -63,6 +63,54 @@ async def get_kessler_risk_endpoint(db = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to compute Kessler Risk metric: {e}")
 
+@router.get("/kessler_trend")
+async def get_kessler_trend(db = Depends(get_db)):
+    """
+    Real 7-day Kessler Index trend, computed daily from actual conjunction history.
+    """
+    try:
+        total_leo = await db["satellites"].count_documents({})
+        debris_cnt = await db["satellites"].count_documents({"object_type": "DEBRIS"})
+
+        cursor = db["conjunctions"].find({})
+        conjs = await cursor.to_list(length=5000)
+
+        now_dt = datetime.now(timezone.utc)
+        day_counts = defaultdict(int)
+
+        for conj in conjs:
+            tca = conj.get("tca_utc")
+            if isinstance(tca, str):
+                try:
+                    tca_dt = datetime.fromisoformat(tca.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            elif isinstance(tca, datetime):
+                tca_dt = tca
+            else:
+                continue
+
+            age_days = (now_dt - tca_dt).days
+            if 0 <= age_days < 7 and conj.get("risk_level") in ("CRITICAL", "HIGH"):
+                day_key = tca_dt.strftime("%Y-%m-%d")
+                day_counts[day_key] += 1
+
+        trend = []
+        for d in range(6, -1, -1):
+            day_dt = now_dt - timedelta(days=d)
+            day_key = day_dt.strftime("%Y-%m-%d")
+            high_risk_count = day_counts.get(day_key, 0)
+            k_index = compute_kessler_index(high_risk_count, total_leo, debris_cnt)
+            trend.append({
+                "date": day_key,
+                "day": day_dt.strftime("%a"),
+                "risk": round(k_index, 2)
+            })
+
+        return trend
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to compute Kessler trend: {e}")
+
 @router.get("/risk_timeline")
 async def get_risk_timeline(
     hours: int = Query(default=24, ge=1, le=168),
@@ -74,10 +122,7 @@ async def get_risk_timeline(
     try:
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         cursor = db["conjunctions"].find({
-            "$or": [
-                {"tca_utc": {"$gte": start_time}},
-                {"tca_utc": {"$gte": start_time.isoformat()}}
-            ]
+            "tca_utc": {"$gte": start_time.isoformat()}
         })
         conjunctions_list = await cursor.to_list(length=2000)
         
@@ -185,9 +230,14 @@ async def get_object_type_breakdown(db = Depends(get_db)):
             else:
                 counts["ROCKET_OTHER"] += 1
                 
-        return [{"type_pair": k, "count": v} for k, v in counts.items()]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze catalog object breakdown: {e}")
+        label_map = {
+            "DEBRIS_DEBRIS": "Debris-Debris",
+            "DEBRIS_PAYLOAD": "Debris-Payload",
+            "PAYLOAD_PAYLOAD": "Payload-Payload",
+            "ROCKET_OTHER": "Rocket-Other"
+        }
+        return [{"name": label_map[k], "value": v} for k, v in counts.items()]
+    except Exception as e:        raise HTTPException(status_code=500, detail=f"Failed to analyze catalog object breakdown: {e}")
 
 @router.get("/trajectory_uncertainty")
 async def get_trajectory_uncertainty(satellite_id: str, db = Depends(get_db)):
