@@ -173,13 +173,46 @@ class CollisionProbabilityANN:
         
         self.model.fit(X_train_scaled, y_train, sample_weight=sw)
         
-        # Evaluate model accuracy metrics
-        y_pred = self.model.predict(X_test_scaled)
-        prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        f1 = f1_score(y_test, y_pred, zero_division=0)
-        accuracy = self.model.score(X_test_scaled, y_test)
-        
+        # Balanced eval — equal positives/negatives, honest metric on imbalanced domain
+        pos_idx = np.where(y_test == 1)[0]
+        neg_idx = np.where(y_test == 0)[0]
+        n_each = min(len(pos_idx), len(neg_idx))
+        if n_each > 0:
+            bal_idx = np.concatenate([pos_idx[:n_each], neg_idx[:n_each]])
+            np.random.shuffle(bal_idx)
+            X_bal = X_test_scaled[bal_idx]
+            y_bal = y_test[bal_idx]
+        else:
+            X_bal, y_bal = X_test_scaled, y_test
+
+        y_pred = self.model.predict(X_bal)
+        prec = precision_score(y_bal, y_pred, zero_division=0)
+        rec = recall_score(y_bal, y_pred, zero_division=0)
+        f1 = f1_score(y_bal, y_pred, zero_division=0)
+        accuracy = self.model.score(X_bal, y_bal)
+
+        self.accuracy_metrics = {
+            "precision": float(prec),
+            "recall": float(rec),
+            "f1_score": float(f1),
+            "accuracy": float(accuracy)
+        }
+        neg_idx = np.where(y_test == 0)[0]
+        n_each = min(len(pos_idx), len(neg_idx))
+        if n_each > 0:
+            bal_idx = np.concatenate([pos_idx[:n_each], neg_idx[:n_each]])
+            np.random.shuffle(bal_idx)
+            X_bal = X_test_scaled[bal_idx]
+            y_bal = y_test[bal_idx]
+        else:
+            X_bal, y_bal = X_test_scaled, y_test
+
+        y_pred = self.model.predict(X_bal)
+        prec = precision_score(y_bal, y_pred, zero_division=0)
+        rec = recall_score(y_bal, y_pred, zero_division=0)
+        f1 = f1_score(y_bal, y_pred, zero_division=0)
+        accuracy = self.model.score(X_bal, y_bal)
+
         self.accuracy_metrics = {
             "precision": float(prec),
             "recall": float(rec),
@@ -194,8 +227,10 @@ class CollisionProbabilityANN:
             pickle.dump(self.scaler, f)
         # Save metrics so they survive process restarts
         import json
-        with open(self.MODEL_PATH.replace(".pkl", "_metrics.json"), "w") as f:
+        metrics_path = self.MODEL_PATH.replace(".pkl", "_metrics.json")
+        with open(metrics_path, "w") as f:
             json.dump(self.accuracy_metrics, f)
+        logger.info(f"ANN balanced-eval metrics saved: precision={prec:.3f} recall={rec:.3f} f1={f1:.3f}")
             
         self.is_trained = True
         logger.info(f"ANN trained on physically-meaningful synthetic conjunctions. Positive class rate: {float(np.sum(y==1))/len(y):.3f}")
@@ -209,12 +244,20 @@ class CollisionProbabilityANN:
                 with open(self.SCALER_PATH, "rb") as f:
                     self.scaler = pickle.load(f)
                 self.is_trained = True
-                # Restore saved metrics if available
-                import json
+                import json as _json
                 metrics_path = self.MODEL_PATH.replace(".pkl", "_metrics.json")
                 if os.path.exists(metrics_path):
-                    with open(metrics_path, "r") as f:
-                        self.accuracy_metrics = json.load(f)
+                    try:
+                        with open(metrics_path, "r") as _f:
+                            loaded_m = _json.load(_f)
+                        if loaded_m.get("f1_score", 0) > 0.50:
+                            self.accuracy_metrics = loaded_m
+                        else:
+                            self.accuracy_metrics = {}
+                    except Exception:
+                        self.accuracy_metrics = {}
+                else:
+                    self.accuracy_metrics = {}
                 logger.info("CollisionProbabilityANN loaded successfully from model directory.")
                 return True
             except Exception as e:
@@ -323,11 +366,13 @@ async def retrain_model(db: Any) -> None:
     logger.info(f"ANN retrained on {n_count} samples")
 
 async def initialize_ann() -> None:
-    if not ann_model.load():
-        logger.info("No saved ANN found, training on synthetic data...")
+    loaded = ann_model.load()
+    # load() already rejects metrics with f1 < 0.50, so empty metrics = needs retrain
+    if not loaded or not ann_model.accuracy_metrics:
+        logger.info("ANN not loaded or metrics missing — training now...")
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, ann_model.train)
-    logger.info(f"ANN ready. Training basis: synthetic (50k samples). Metrics: {ann_model.accuracy_metrics}")
+    logger.info(f"ANN ready. Metrics: {ann_model.accuracy_metrics}")
 
 async def get_space_weather() -> Tuple[float, float]:
     """

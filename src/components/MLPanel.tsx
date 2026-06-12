@@ -65,9 +65,9 @@ export default function MLPanel({ onAddLog }: MLPanelProps) {
   }, [selectedConj]);
 
   const featureNames = [
-    'semi_major_axis_diff','eccentricity_diff','inclination_diff','raan_diff',
-    'arg_of_perigee_diff','mean_anomaly_diff','miss_distance_m','relative_speed_km_s',
-    'bstar_drag_coeff_a','bstar_drag_coeff_b','solar_activity_f107','covariance_ellipsoid_intersection',
+    'miss_distance_km','relative_velocity_kmps','combined_cross_section_m²','time_to_tca_hours',
+    'criticality_score_a','criticality_score_b','object_type_a_encoded','object_type_b_encoded',
+    'altitude_km','solar_flux_f10.7','kp_index','maneuver_history_count',
   ];
 
   // ─── SUB-SECTION 2: LSTM ─────────────────────────────────────────────────
@@ -371,7 +371,7 @@ export default function MLPanel({ onAddLog }: MLPanelProps) {
                       <LineChart data={rlCurve} margin={{top:2,right:4,left:-30,bottom:2}}>
                         <CartesianGrid strokeDasharray="2 4" stroke="#1e293b" vertical={false}/>
                         <XAxis dataKey="episode" hide/>
-                        <YAxis stroke="#475569" fontSize={7} fontFamily="monospace" tickLine={false}/>
+                        <YAxis stroke="#475569" fontSize={7} fontFamily="monospace" tickLine={false} domain={['auto', 'auto']}/>
                         <Tooltip contentStyle={{background:'#090d16',border:'1px solid #1e293b',fontSize:'8px',fontFamily:'monospace'}} formatter={(v:any)=>[v,'Reward']}/>
                         <Line type="monotone" dataKey="reward" stroke="#22d3ee" dot={false} strokeWidth={1.5}/>
                       </LineChart>

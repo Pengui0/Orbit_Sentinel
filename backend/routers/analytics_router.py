@@ -189,6 +189,51 @@ async def get_object_type_breakdown(db = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to analyze catalog object breakdown: {e}")
 
+@router.get("/trajectory_uncertainty")
+async def get_trajectory_uncertainty(satellite_id: str, db = Depends(get_db)):
+    """Returns LSTM trajectory deviation prediction for a given satellite."""
+    try:
+        sat = await db["satellites"].find_one({"norad_id": satellite_id})
+        if not sat:
+            raise HTTPException(status_code=404, detail="Satellite not found.")
+        tle1 = sat.get("tle1", "")
+        tle2 = sat.get("tle2", "")
+        if not tle1 or not tle2:
+            raise HTTPException(status_code=400, detail="No TLE data for satellite.")
+
+        from backend.core.sgp4_propagator import propagate_single
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        history = []
+        for i in range(10):
+            t = now - timedelta(minutes=(9 - i) * 8)
+            pos = propagate_single(tle1, tle2, t)
+            if pos:
+                history.append({"x": pos.get("x", 0), "y": pos.get("y", 0), "z": pos.get("z", 0),
+                                 "vx": pos.get("vx", 0), "vy": pos.get("vy", 0), "vz": pos.get("vz", 0)})
+
+        result = lstm_predictor.predict_deviation(history)
+        return {
+            "satellite_id": satellite_id,
+            "dx": round(result["dx_km"], 4),
+            "dy": round(result["dy_km"], 4),
+            "dz": round(result["dz_km"], 4),
+            "total_deviation": round(result["total_position_deviation_km"], 4),
+            "source": "lstm_trained" if lstm_predictor.is_trained else "fallback_zeros"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LSTM prediction failed: {e}")
+
+
+@router.post("/predict_uncertainty")
+async def post_predict_uncertainty(body: dict, db = Depends(get_db)):
+    """POST version for on-demand LSTM run trigger."""
+    satellite_id = body.get("satellite_id", "")
+    return await get_trajectory_uncertainty(satellite_id, db)
+
+
 @router.get("/agent_rewards")
 async def get_agent_rewards():
     """
@@ -203,12 +248,13 @@ async def get_ann_accuracy():
     Labels are physics-derived (Chan Pc > 1e-4 threshold, NASA/ESA operational standard).
     """
     metrics = ann_model.accuracy_metrics or {}
+
     return {
         "status": "TRAINED" if ann_model.is_trained else "NOT_TRAINED",
         "precision": round(metrics.get("precision", 0.0) * 100, 2),
-        "recall": round(metrics.get("recall", 0.0) * 100, 2),
-        "f1": round(metrics.get("f1_score", 0.0) * 100, 2),
-        "accuracy": round(metrics.get("accuracy", 0.0) * 100, 2),
+        "recall":    round(metrics.get("recall", 0.0) * 100, 2),
+        "f1":        round(metrics.get("f1_score", 0.0) * 100, 2),
+        "accuracy":  round(metrics.get("accuracy", 0.0) * 100, 2),
         "training_samples": 50000,
         "label_method": "physics_pc_1e-4_threshold",
         "positive_class_rate": round(metrics.get("positive_class_rate", 0.0), 4),
